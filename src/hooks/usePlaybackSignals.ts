@@ -48,6 +48,9 @@ export function usePlaybackSignals({
     callbacksRef,
     pendingRoomCommandRef,
     lastAppliedSignalKeyRef,
+    lastAppliedIntentAtRef,
+    lastLocalIntentAtRef,
+    expectedPlayerStateRef,
     suppressEventsUntilRef,
     lastPersistedAtRef,
     lastSampleRef,
@@ -68,7 +71,12 @@ export function usePlaybackSignals({
         return;
       }
 
-      if (Date.now() < suppressEventsUntilRef.current) return;
+      if (
+        Date.now() < suppressEventsUntilRef.current &&
+        event.data === expectedPlayerStateRef.current
+      ) {
+        return;
+      }
 
         publishPlayback(
           reportedVideoId,
@@ -79,6 +87,7 @@ export function usePlaybackSignals({
     },
     [
       applyRoomCommand,
+      expectedPlayerStateRef,
       pendingRoomCommandRef,
       publishPlayback,
       suppressEventsUntilRef,
@@ -147,11 +156,43 @@ export function usePlaybackSignals({
     if (lastAppliedSignalKeyRef.current === signalKey) return;
     lastAppliedSignalKeyRef.current = signalKey;
 
-    if (pendingRoomCommandRef.current?.videoId === signal.videoId) return;
+    if (pendingRoomCommandRef.current?.videoId === signal.videoId) {
+      return;
+    }
 
+    const kind = signal.kind === 'heartbeat' ? 'heartbeat' : 'intent';
     const targetSeconds = Math.max(0, signal.currentTime);
     const currentSeconds = Number(player.getCurrentTime?.()) || 0;
     const currentState = Number(player.getPlayerState?.());
+
+    if (
+      kind === 'intent' &&
+      signal.sentAt < lastAppliedIntentAtRef.current
+    ) {
+      return;
+    }
+
+    if (
+      kind === 'intent' &&
+      lastLocalIntentAtRef.current > signal.sentAt
+    ) {
+      return;
+    }
+
+    const willSeek = Math.abs(currentSeconds - targetSeconds) > 1.75;
+    const willPlay =
+      kind === 'intent' && signal.isPlaying && currentState !== 1;
+    const willPause =
+      kind === 'intent' && !signal.isPlaying && currentState !== 2;
+    const heartbeatSeek =
+      kind === 'heartbeat' &&
+      signal.isPlaying &&
+      currentState === 1 &&
+      willSeek;
+
+    if (kind === 'heartbeat' && !heartbeatSeek) {
+      return;
+    }
 
     const targetRate = Number(signal.playbackRate);
 
@@ -166,15 +207,28 @@ export function usePlaybackSignals({
 
     suppressEventsUntilRef.current = Date.now() + 1100;
 
-    if (Math.abs(currentSeconds - targetSeconds) > 1.75) {
+    if (heartbeatSeek || willSeek) {
       player.seekTo(targetSeconds, true);
     }
 
-    if (signal.isPlaying && currentState !== 1) {
+    if (willPlay) {
       player.playVideo();
-    } else if (!signal.isPlaying && currentState !== 2) {
+    } else if (willPause) {
       player.pauseVideo();
     }
+
+    if (kind === 'intent') {
+      lastAppliedIntentAtRef.current = Math.max(
+        lastAppliedIntentAtRef.current,
+        signal.sentAt,
+      );
+    }
+
+    expectedPlayerStateRef.current = willPlay
+      ? 1
+      : willPause
+        ? 2
+        : currentState;
 
     lastSampleRef.current = {
       videoId: signal.videoId,
@@ -183,7 +237,10 @@ export function usePlaybackSignals({
       state: signal.isPlaying ? 1 : 2,
     };
   }, [
+    lastAppliedIntentAtRef,
     lastAppliedSignalKeyRef,
+    lastLocalIntentAtRef,
+    expectedPlayerStateRef,
     lastSampleRef,
     pendingRoomCommandRef,
     playbackSignal,
@@ -236,6 +293,7 @@ export function usePlaybackSignals({
           isPlaying,
           playbackRate: Number(player.getPlaybackRate?.()) || speed,
           sentAt: now,
+          kind: 'heartbeat',
         })
         .catch((broadcastError) => {
           console.error(

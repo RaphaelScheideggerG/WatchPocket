@@ -28,6 +28,7 @@ export type PlaybackSignal = {
   isPlaying: boolean;
   playbackRate: number;
   sentAt: number;
+  kind?: 'intent' | 'heartbeat';
 };
 
 export type OnlinePerson = {

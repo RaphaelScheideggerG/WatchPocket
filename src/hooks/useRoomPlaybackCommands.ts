@@ -6,7 +6,6 @@ import type { YouTubePlayerRef } from './useYouTubePlayer';
 type UseRoomPlaybackCommandsOptions = {
   roomState: RoomState | null;
   videoId: string | null;
-  userId: string | null;
   playerReady: boolean;
   playerRef: YouTubePlayerRef;
   runtime: PlaybackRuntime;
@@ -22,7 +21,6 @@ type UseRoomPlaybackCommandsOptions = {
 export function useRoomPlaybackCommands({
   roomState,
   videoId,
-  userId,
   playerReady,
   playerRef,
   runtime,
@@ -108,7 +106,7 @@ export function useRoomPlaybackCommands({
     videoId,
   ]);
 
-  // Apply the saved play/pause state, except when the local user caused it.
+  // Apply the saved play/pause state once on join; live sync uses playback signals.
   useEffect(() => {
     const player = playerRef.current;
     if (!playerReady || !player || !roomState?.video_id) return;
@@ -120,7 +118,7 @@ export function useRoomPlaybackCommands({
     lastAppliedRoomCommandKeyRef.current = commandKey;
     hasAppliedRoomCommandRef.current = true;
 
-    if (!isInitialCommand && roomState.updated_by === userId) return;
+    if (!isInitialCommand) return;
 
     const command = {
       videoId: roomState.video_id,
@@ -147,7 +145,6 @@ export function useRoomPlaybackCommands({
     playerReady,
     playerRef,
     roomState,
-    userId,
   ]);
 
   return restartVideo;
