@@ -42,7 +42,6 @@ export function usePlaybackSync({
   const restartVideo = useRoomPlaybackCommands({
     roomState,
     videoId,
-    userId,
     playerReady,
     playerRef,
     runtime,

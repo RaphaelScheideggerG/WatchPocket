@@ -137,7 +137,7 @@ export default function Home({ onEnterRoom }: HomeProps) {
       <Container size={420} w="100%" style={{ position: 'relative', zIndex: 1 }}>
         <Stack align="center" gap="xs" mb="xl">
           <Title order={1} ta="center" fw={800}>
-            WatchTogether <Text span c="#e64980">♥</Text>
+            WatchPocket <Text span c="#e64980">♥</Text>
           </Title>
         </Stack>
 

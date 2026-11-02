@@ -35,6 +35,9 @@ export type PlaybackRuntime = {
   lastAppliedRoomCommandKeyRef: MutableRefObject<string | null>;
   hasAppliedRoomCommandRef: MutableRefObject<boolean>;
   lastAppliedSignalKeyRef: MutableRefObject<string | null>;
+  lastAppliedIntentAtRef: MutableRefObject<number>;
+  lastLocalIntentAtRef: MutableRefObject<number>;
+  expectedPlayerStateRef: MutableRefObject<number | null>;
   suppressEventsUntilRef: MutableRefObject<number>;
   lastPersistedAtRef: MutableRefObject<number>;
   lastSampleRef: MutableRefObject<PlaybackSample | null>;

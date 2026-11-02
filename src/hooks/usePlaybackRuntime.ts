@@ -26,6 +26,9 @@ export function usePlaybackRuntime({
   const lastAppliedRoomCommandKeyRef = useRef<string | null>(null);
   const hasAppliedRoomCommandRef = useRef(false);
   const lastAppliedSignalKeyRef = useRef<string | null>(null);
+  const lastAppliedIntentAtRef = useRef(0);
+  const lastLocalIntentAtRef = useRef(0);
+  const expectedPlayerStateRef = useRef<number | null>(null);
   const suppressEventsUntilRef = useRef(0);
   const lastPersistedAtRef = useRef(0);
   const lastSampleRef = useRef<PlaybackSample | null>(null);
@@ -46,6 +49,12 @@ export function usePlaybackRuntime({
       const sentAt = Date.now();
 
       lastPersistedAtRef.current = sentAt;
+      lastLocalIntentAtRef.current = sentAt;
+      lastAppliedIntentAtRef.current = Math.max(
+        lastAppliedIntentAtRef.current,
+        sentAt,
+      );
+      expectedPlayerStateRef.current = isPlaying ? 1 : 2;
       lastSampleRef.current = {
         videoId: targetVideoId,
         time: safeSeconds,
@@ -69,6 +78,7 @@ export function usePlaybackRuntime({
           isPlaying,
           playbackRate,
           sentAt,
+          kind: 'intent',
         })
         .catch((broadcastError) => {
           console.error(
@@ -105,6 +115,7 @@ export function usePlaybackRuntime({
         wall: now,
         state: command.isPlaying ? 1 : 2,
       };
+      expectedPlayerStateRef.current = command.isPlaying ? 1 : 2;
 
       pendingRoomCommandRef.current = null;
     },
@@ -119,6 +130,9 @@ export function usePlaybackRuntime({
     lastAppliedRoomCommandKeyRef,
     hasAppliedRoomCommandRef,
     lastAppliedSignalKeyRef,
+    lastAppliedIntentAtRef,
+    lastLocalIntentAtRef,
+    expectedPlayerStateRef,
     suppressEventsUntilRef,
     lastPersistedAtRef,
     lastSampleRef,
