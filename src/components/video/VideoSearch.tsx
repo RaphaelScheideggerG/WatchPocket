@@ -12,7 +12,7 @@ import {
   Transition,
   UnstyledButton,
 } from '@mantine/core';
-import { IconSearch } from '@tabler/icons-react';
+import { IconSearch, IconPaperclip } from '@tabler/icons-react';
 import type { SearchResult } from '../../utils/youtube';
 
 type VideoSearchProps = {
@@ -24,6 +24,7 @@ type VideoSearchProps = {
   onQueryChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onSelectVideo: (videoId: string) => void;
+  onAttach?: () => void;
 };
 
 /** Search overlay: it renders the form and result list, not the player logic. */
@@ -36,6 +37,7 @@ export default function VideoSearch({
   onQueryChange,
   onSubmit,
   onSelectVideo,
+  onAttach,
 }: VideoSearchProps) {
   return (
     <Transition mounted={mounted} transition="pop-top-left" duration={180}>
@@ -82,18 +84,25 @@ export default function VideoSearch({
                     },
                   }}
                 />
-
                 <ActionIcon
-                  type="submit"
+                  type={query.trim() ? "submit" : "button"}
                   variant="filled"
-                  color="pink"
+                  color={query.trim() ? "pink" : "gray"}
                   radius="xl"
                   size="lg"
                   loading={loading}
-                  disabled={!query.trim()}
-                  aria-label="Buscar"
+                  aria-label={query.trim() ? "Buscar" : "Anexar arquivo"}
+                  onClick={() => {
+                    if (!query.trim() && onAttach) {
+                      onAttach();
+                    }
+                  }}
                 >
-                  <IconSearch size={15} />
+                  {query.trim() ? (
+                    <IconSearch size={15} />
+                  ) : (
+                    <IconPaperclip size={15} />
+                  )}
                 </ActionIcon>
               </Group>
             </Paper>

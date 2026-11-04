@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent, type ChangeEvent } from 'react';
 import {
   ActionIcon,
   Box,
@@ -24,6 +24,9 @@ import {
   searchYouTubeVideos,
   type SearchResult,
 } from '../../utils/youtube';
+
+import { validateVideoFile } from '../../utils/videoFile';
+import { uploadVideoToR2 } from '../../services/videoStorage';
 
 import VideoSearch from './VideoSearch';
 
@@ -71,6 +74,8 @@ export default function Video({
   const playerRef = useRef<any>(null);
   const playerMountRef = useRef<HTMLDivElement | null>(null);
   const playerHandlersRef = useRef<PlayerEventHandlers>(EMPTY_PLAYER_HANDLERS);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
 
   videoIdRef.current = videoId;
 
@@ -164,6 +169,61 @@ export default function Video({
     }
   };
 
+  const handleAttach = () => {
+    // Dispara o clique no input oculto do sistema operacional
+    fileInputRef.current?.click();
+  };
+  
+  const handleFileChange = async (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const input = event.currentTarget;
+    const selectedFile = input.files?.[0];
+  
+    if (!selectedFile) return;
+  
+    // Permite selecionar novamente o mesmo arquivo.
+    input.value = '';
+  
+    setError('');
+  
+    // 1. Valida o arquivo.
+    const validation = validateVideoFile(selectedFile);
+  
+    if (!validation.valid) {
+      setError(validation.error);
+      return;
+    }
+  
+    setLoading(true);
+  
+    try {
+      // 2. Solicita ao serviço o upload do vídeo.
+      const uploadedVideo = await uploadVideoToR2(selectedFile);
+  
+      console.log('Upload concluído:', uploadedVideo);
+  
+      // Futuramente:
+      // 3. Registrar metadados no Supabase.
+      // 4. Selecionar o vídeo na sala.
+      // 5. Atualizar o player.
+  
+      setShowSearch(false);
+      setQuery('');
+  
+    } catch (uploadError) {
+      console.error(uploadError);
+  
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : 'Falha ao enviar o vídeo para a nuvem.',
+      );
+  
+    } finally {
+      setLoading(false);
+    }
+  };
   return (
     <Box
       pos="relative"
@@ -291,7 +351,19 @@ export default function Video({
         onSelectVideo={(id) => {
           void selectVideo(id);
         }}
+        onAttach={handleAttach}
+      />
+
+      {/* Input de arquivo invisível e universal */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        style={{ display: 'none' }}
+        // Dica mobile-first: aceita apenas formatos de vídeo populares
+        accept="video/mp4,video/mkv,video/webm" 
       />
     </Box>
   );
 }
+
