@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   Box,
@@ -47,6 +47,25 @@ export default function Room({
     enabled: true,
   });
 
+  const [visibleError, setVisibleError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!error) {
+      setVisibleError(null);
+      return;
+    }
+  
+    setVisibleError(error);
+  
+    const timeoutId = window.setTimeout(() => {
+      setVisibleError(null);
+    }, 5000);
+  
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [error]);
+
   const handleShare = async () => {
     try {
       await navigator.clipboard.writeText(inviteCode);
@@ -88,7 +107,7 @@ export default function Room({
 
       {/* 2. Indicador de conexão e erros */}
 
-      {(status === 'connecting' || error) && (
+      {(status === 'connecting' || visibleError) && (
         <Box
           pos="absolute"
           top={16}
@@ -105,13 +124,12 @@ export default function Room({
         >
           <Text
             size="xs"
-            c={error ? 'red.3' : 'gray.3'}
+            c={visibleError ? 'red.3' : 'gray.3'}
           >
-            {error || 'Conectando à sala...'}
+            {visibleError || 'Conectando à sala...'}
           </Text>
         </Box>
       )}
-
       {/* 3. Botão de compartilhamento */}
 
       <Box
