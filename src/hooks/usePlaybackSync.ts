@@ -1,7 +1,10 @@
 import type { PlaybackSignal, RoomState } from './useZzzRoom';
-import type { PlayerEventHandlers, YouTubePlayerRef, } from './useYouTubePlayer';
-
-import type { BroadcastPlayback, SavePlayback, } from '../hooks/playbackSyncTypes';
+import type { PlayerEventHandlers, YouTubePlayerRef } from './useYouTubePlayer';
+import type {
+  BroadcastPlayback,
+  SavePlayback,
+  VideoProviderType,
+} from './playbackSyncTypes';
 
 import { usePlaybackRuntime } from './usePlaybackRuntime';
 import { useRoomPlaybackCommands } from './useRoomPlaybackCommands';
@@ -10,6 +13,7 @@ import { usePlaybackSignals } from './usePlaybackSignals';
 type UsePlaybackSyncOptions = {
   roomState: RoomState | null;
   videoId: string | null;
+  videoSource: VideoProviderType;
   playbackSignal: PlaybackSignal | null;
   userId: string | null;
   playerReady: boolean;
@@ -20,10 +24,11 @@ type UsePlaybackSyncOptions = {
   setError: (message: string) => void;
 };
 
-/** Composes the smaller hooks that coordinate playback across the room. */
+/** Composes the playback hooks for both YouTube and native HTML video players. */
 export function usePlaybackSync({
   roomState,
   videoId,
+  videoSource,
   playbackSignal,
   userId,
   playerReady,
@@ -35,6 +40,7 @@ export function usePlaybackSync({
 }: UsePlaybackSyncOptions) {
   const { runtime, publishPlayback, applyRoomCommand } = usePlaybackRuntime({
     videoId,
+    videoSource,
     onSavePlayback,
     onBroadcastPlayback,
   });
@@ -42,16 +48,17 @@ export function usePlaybackSync({
   const restartVideo = useRoomPlaybackCommands({
     roomState,
     videoId,
+    videoSource,
     playerReady,
     playerRef,
     runtime,
-    applyRoomCommand,
     setError,
   });
 
   usePlaybackSignals({
     playbackSignal,
     videoId,
+    videoSource,
     userId,
     playerReady,
     playerRef,

@@ -5,13 +5,14 @@ import type {
   RoomState,
   PlaybackSignal,
 } from '../hooks/useZzzRoom';
+import type { VideoProviderType } from '../hooks/playbackSyncTypes';
 
 import Video from './video/Video';
 import Chat from './Chat';
 
 type PlayerProps = {
   roomState: RoomState | null;
-  onSelectVideo: (videoId: string) => Promise<void>;
+  onSelectVideo: (videoId: string, videoSource?: VideoProviderType) => Promise<void>;
 
   // Dados e ações do chat.
   messages: ChatMessage[];

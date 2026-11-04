@@ -5,10 +5,12 @@ import type {
   PlaybackSample,
   SavePlayback,
   BroadcastPlayback,
+  VideoProviderType,
 } from './playbackSyncTypes';
 
 type UsePlaybackRuntimeOptions = {
   videoId: string | null;
+  videoSource: VideoProviderType;
   onSavePlayback: SavePlayback;
   onBroadcastPlayback: BroadcastPlayback;
 };
@@ -16,15 +18,15 @@ type UsePlaybackRuntimeOptions = {
 /** Stores shared refs and stable helpers used by the playback sub-hooks. */
 export function usePlaybackRuntime({
   videoId,
+  videoSource,
   onSavePlayback,
   onBroadcastPlayback,
 }: UsePlaybackRuntimeOptions) {
   const videoIdRef = useRef<string | null>(videoId);
+  const providerRef = useRef<VideoProviderType>(videoSource);
   const callbacksRef = useRef({ onSavePlayback, onBroadcastPlayback });
   const pendingRoomCommandRef = useRef<PendingRoomCommand | null>(null);
   const lastLoadedVideoIdRef = useRef<string | null>(null);
-  const lastAppliedRoomCommandKeyRef = useRef<string | null>(null);
-  const hasAppliedRoomCommandRef = useRef(false);
   const lastAppliedSignalKeyRef = useRef<string | null>(null);
   const lastAppliedIntentAtRef = useRef(0);
   const lastLocalIntentAtRef = useRef(0);
@@ -34,6 +36,7 @@ export function usePlaybackRuntime({
   const lastSampleRef = useRef<PlaybackSample | null>(null);
 
   videoIdRef.current = videoId;
+  providerRef.current = videoSource;
   callbacksRef.current = { onSavePlayback, onBroadcastPlayback };
 
   const publishPlayback = useCallback(
@@ -47,6 +50,7 @@ export function usePlaybackRuntime({
         ? Math.max(0, currentSeconds)
         : 0;
       const sentAt = Date.now();
+      const provider = providerRef.current;
 
       lastPersistedAtRef.current = sentAt;
       lastLocalIntentAtRef.current = sentAt;
@@ -60,6 +64,7 @@ export function usePlaybackRuntime({
         time: safeSeconds,
         wall: sentAt,
         state: isPlaying ? 1 : 2,
+        provider,
       };
 
       void callbacksRef.current
@@ -74,6 +79,7 @@ export function usePlaybackRuntime({
       void callbacksRef.current
         .onBroadcastPlayback({
           videoId: targetVideoId,
+          videoSource: provider,
           currentTime: safeSeconds,
           isPlaying,
           playbackRate,
@@ -90,6 +96,7 @@ export function usePlaybackRuntime({
     [],
   );
 
+  /** Applies room commands through the common YouTube-compatible player adapter. */
   const applyRoomCommand = useCallback(
     (player: any, command: PendingRoomCommand) => {
       const now = Date.now();
@@ -114,6 +121,7 @@ export function usePlaybackRuntime({
         time: command.currentSeconds,
         wall: now,
         state: command.isPlaying ? 1 : 2,
+        provider: command.provider,
       };
       expectedPlayerStateRef.current = command.isPlaying ? 1 : 2;
 
@@ -124,11 +132,10 @@ export function usePlaybackRuntime({
 
   const runtime: PlaybackRuntime = {
     videoIdRef,
+    providerRef,
     callbacksRef,
     pendingRoomCommandRef,
     lastLoadedVideoIdRef,
-    lastAppliedRoomCommandKeyRef,
-    hasAppliedRoomCommandRef,
     lastAppliedSignalKeyRef,
     lastAppliedIntentAtRef,
     lastLocalIntentAtRef,

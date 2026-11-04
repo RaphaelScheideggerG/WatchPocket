@@ -1,60 +1,66 @@
 import { useCallback, useEffect } from 'react';
 import type { RoomState } from './useZzzRoom';
-import type { PlaybackRuntime } from './playbackSyncTypes';
+import type { PlaybackRuntime, VideoProviderType } from './playbackSyncTypes';
 import type { YouTubePlayerRef } from './useYouTubePlayer';
 
 type UseRoomPlaybackCommandsOptions = {
   roomState: RoomState | null;
   videoId: string | null;
+  videoSource: VideoProviderType;
   playerReady: boolean;
   playerRef: YouTubePlayerRef;
   runtime: PlaybackRuntime;
-  applyRoomCommand: (player: any, command: {
-    videoId: string;
-    currentSeconds: number;
-    isPlaying: boolean;
-  }) => void;
   setError: (message: string) => void;
 };
 
-/** Handles video changes and play/pause commands persisted in the room. */
+/** Handles selected-video changes and persisted room playback commands. */
 export function useRoomPlaybackCommands({
   roomState,
   videoId,
+  videoSource,
   playerReady,
   playerRef,
   runtime,
-  applyRoomCommand,
   setError,
 }: UseRoomPlaybackCommandsOptions) {
   const {
     pendingRoomCommandRef,
     lastLoadedVideoIdRef,
-    lastAppliedRoomCommandKeyRef,
-    hasAppliedRoomCommandRef,
     lastSampleRef,
     suppressEventsUntilRef,
   } = runtime;
 
-  const restartVideo = useCallback((targetVideoId: string) => {
-    const player = playerRef.current;
-    if (!player) return;
+  const restartVideo = useCallback(
+    (targetVideoId: string) => {
+      const player = playerRef.current;
+      if (!player) return;
 
-    pendingRoomCommandRef.current = {
-      videoId: targetVideoId,
-      currentSeconds: 0,
-      isPlaying: true,
-    };
-    lastSampleRef.current = null;
-    suppressEventsUntilRef.current = Date.now() + 1400;
+      pendingRoomCommandRef.current = {
+        videoId: targetVideoId,
+        currentSeconds: 0,
+        isPlaying: true,
+        provider: videoSource,
+      };
+      lastSampleRef.current = null;
+      suppressEventsUntilRef.current = Date.now() + 1400;
 
-    player.loadVideoById({
-      videoId: targetVideoId,
-      startSeconds: 0,
-    });
-  }, [lastSampleRef, pendingRoomCommandRef, playerRef, suppressEventsUntilRef]);
+      // Both player adapters implement this YouTube-compatible method.
+      player.loadVideoById({
+        videoId: targetVideoId,
+        startSeconds: 0,
+      });
+    },
+    [
+      lastSampleRef,
+      pendingRoomCommandRef,
+      playerRef,
+      suppressEventsUntilRef,
+      videoSource,
+    ],
+  );
 
-  // Load each newly selected video once, using the latest saved room position.
+  // Load each selected item once. The provider is part of the identity because
+  // a YouTube ID and an R2 object key belong to different playback systems.
   useEffect(() => {
     const player = playerRef.current;
     if (!playerReady || !player) return;
@@ -65,22 +71,21 @@ export function useRoomPlaybackCommands({
       return;
     }
 
-    if (lastLoadedVideoIdRef.current === videoId) return;
+    const loadKey = `${videoSource}:${videoId}`;
+    if (lastLoadedVideoIdRef.current === loadKey) return;
 
-    lastLoadedVideoIdRef.current = videoId;
+    lastLoadedVideoIdRef.current = loadKey;
     lastSampleRef.current = null;
 
     const command = {
       videoId,
-      currentSeconds: Math.max(
-        0,
-        Number(roomState?.current_seconds) || 0,
-      ),
+      currentSeconds: Math.max(0, Number(roomState?.current_seconds) || 0),
       isPlaying: roomState?.is_playing ?? true,
+      provider: videoSource,
     };
 
     pendingRoomCommandRef.current = command;
-    suppressEventsUntilRef.current = Date.now() + 700;
+    suppressEventsUntilRef.current = Date.now() + 1400;
     setError('');
 
     try {
@@ -104,48 +109,10 @@ export function useRoomPlaybackCommands({
     setError,
     suppressEventsUntilRef,
     videoId,
+    videoSource,
   ]);
 
-  // Apply the saved play/pause state once on join; live sync uses playback signals.
-  useEffect(() => {
-    const player = playerRef.current;
-    if (!playerReady || !player || !roomState?.video_id) return;
 
-    const commandKey = `${roomState.video_id}:${roomState.is_playing}`;
-    if (lastAppliedRoomCommandKeyRef.current === commandKey) return;
-
-    const isInitialCommand = !hasAppliedRoomCommandRef.current;
-    lastAppliedRoomCommandKeyRef.current = commandKey;
-    hasAppliedRoomCommandRef.current = true;
-
-    if (!isInitialCommand) return;
-
-    const command = {
-      videoId: roomState.video_id,
-      currentSeconds: Math.max(
-        0,
-        Number(roomState.current_seconds) || 0,
-      ),
-      isPlaying: roomState.is_playing,
-    };
-
-    const actualVideoId = player.getVideoData?.()?.video_id;
-
-    if (actualVideoId !== command.videoId) {
-      pendingRoomCommandRef.current = command;
-      return;
-    }
-
-    applyRoomCommand(player, command);
-  }, [
-    applyRoomCommand,
-    hasAppliedRoomCommandRef,
-    lastAppliedRoomCommandKeyRef,
-    pendingRoomCommandRef,
-    playerReady,
-    playerRef,
-    roomState,
-  ]);
 
   return restartVideo;
 }

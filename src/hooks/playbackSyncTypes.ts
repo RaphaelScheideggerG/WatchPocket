@@ -4,7 +4,7 @@ import type { PlaybackSignal } from './useZzzRoom';
 export type VideoProviderType = 'youtube' | 'upload';
 
 export type PendingRoomCommand = {
-  videoId: string; // can be a youtube video id or a upload video url
+  videoId: string;
   currentSeconds: number;
   isPlaying: boolean;
   provider: VideoProviderType;
@@ -37,8 +37,6 @@ export type PlaybackRuntime = {
   }>;
   pendingRoomCommandRef: MutableRefObject<PendingRoomCommand | null>;
   lastLoadedVideoIdRef: MutableRefObject<string | null>;
-  lastAppliedRoomCommandKeyRef: MutableRefObject<string | null>;
-  hasAppliedRoomCommandRef: MutableRefObject<boolean>;
   lastAppliedSignalKeyRef: MutableRefObject<string | null>;
   lastAppliedIntentAtRef: MutableRefObject<number>;
   lastLocalIntentAtRef: MutableRefObject<number>;

@@ -419,3 +419,67 @@ from public, anon;
 
 grant execute on function public.zz_create_room(text, integer)
 to authenticated;
+
+-- Allows zz_room_state to store either a YouTube ID or an R2 object key.
+-- Existing rows remain YouTube videos because the new column defaults to 'youtube'.
+-- This migration also reconciles the earlier optional uploaded_video_id design,
+-- if that version was created but not yet used by the application.
+
+begin;
+
+alter table public.zz_room_state
+  add column if not exists video_source text not null default 'youtube';
+
+-- Remove either the original YouTube-only check or checks from the earlier
+-- uploaded_video_id proposal so they can be replaced by one consistent model.
+alter table public.zz_room_state
+  drop constraint if exists zz_room_state_video_id_format;
+
+alter table public.zz_room_state
+  drop constraint if exists zz_room_state_video_source_check;
+
+alter table public.zz_room_state
+  drop constraint if exists zz_room_state_video_format_check;
+
+-- If the earlier metadata-table approach was applied, copy its storage_path
+-- into video_id. The new app stores the R2 object key directly in video_id.
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'zz_room_state'
+      and column_name = 'uploaded_video_id'
+  ) and to_regclass('public.zz_uploaded_videos') is not null then
+    execute '
+      update public.zz_room_state as room_state
+      set video_source = ''upload'',
+          video_id = uploaded_video.storage_path,
+          uploaded_video_id = null
+      from public.zz_uploaded_videos as uploaded_video
+      where room_state.uploaded_video_id = uploaded_video.id
+    ';
+  end if;
+end;
+$$;
+
+alter table public.zz_room_state
+  add constraint zz_room_state_video_source_check
+  check (video_source in ('youtube', 'upload'));
+
+alter table public.zz_room_state
+  add constraint zz_room_state_video_id_format
+  check (
+    video_id is null
+    or (
+      video_source = 'youtube'
+      and video_id ~ '^[A-Za-z0-9_-]{11}$'
+    )
+    or (
+      video_source = 'upload'
+      and video_id ~ '^videos/[0-9a-fA-F-]{36}\.mp4$'
+    )
+  );
+
+commit;

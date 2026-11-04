@@ -13,6 +13,7 @@ export type PlayerMountRef = { current: HTMLDivElement | null };
 export type PlayerEventHandlers = {
   onStateChange: (event: any) => void;
   onPlaybackRateChange: (event: any) => void;
+  onSeeked: () => void;
   onError: (event: any) => void;
   onAutoplayBlocked: () => void;
 };
@@ -20,20 +21,14 @@ export type PlayerEventHandlers = {
 let youtubeApiPromise: Promise<void> | null = null;
 
 function loadYouTubeApi(): Promise<void> {
-  if (window.YT?.Player) {
-    return Promise.resolve();
-  }
-
-  if (youtubeApiPromise) {
-    return youtubeApiPromise;
-  }
+  if (window.YT?.Player) return Promise.resolve();
+  if (youtubeApiPromise) return youtubeApiPromise;
 
   youtubeApiPromise = new Promise<void>((resolve, reject) => {
     let settled = false;
 
     const timeoutId = window.setTimeout(() => {
       if (settled) return;
-
       settled = true;
       youtubeApiPromise = null;
       reject(new Error('A API do YouTube demorou demais para carregar.'));
@@ -41,7 +36,6 @@ function loadYouTubeApi(): Promise<void> {
 
     const fail = () => {
       if (settled) return;
-
       settled = true;
       window.clearTimeout(timeoutId);
       youtubeApiPromise = null;
@@ -50,7 +44,6 @@ function loadYouTubeApi(): Promise<void> {
 
     window.onYouTubeIframeAPIReady = () => {
       if (settled) return;
-
       settled = true;
       window.clearTimeout(timeoutId);
 
@@ -59,9 +52,7 @@ function loadYouTubeApi(): Promise<void> {
       } else {
         youtubeApiPromise = null;
         reject(
-          new Error(
-            'A API do YouTube carregou sem disponibilizar o player.',
-          ),
+          new Error('A API do YouTube carregou sem disponibilizar o player.'),
         );
       }
     };
@@ -90,6 +81,7 @@ type UseYouTubePlayerOptions = {
   playerRef: YouTubePlayerRef;
   handlersRef: { current: PlayerEventHandlers };
   setError: (message: string) => void;
+  enabled?: boolean;
 };
 
 /** Owns only the YouTube iframe player's lifecycle and event wiring. */
@@ -98,16 +90,22 @@ export function useYouTubePlayer({
   playerRef,
   handlersRef,
   setError,
+  enabled = true,
 }: UseYouTubePlayerOptions): boolean {
   const [playerReady, setPlayerReady] = useState(false);
 
   useEffect(() => {
+    if (!enabled) {
+      setPlayerReady(false);
+      return;
+    }
+
     let cancelled = false;
+    setPlayerReady(false);
 
     const initializePlayer = async () => {
       try {
         await loadYouTubeApi();
-
         if (cancelled || !mountRef.current) return;
 
         const target = document.createElement('div');
@@ -125,7 +123,6 @@ export function useYouTubePlayer({
             enablejsapi: 1,
             origin: window.location.origin,
           },
-
           events: {
             onReady: (event: any) => {
               if (cancelled) {
@@ -184,7 +181,7 @@ export function useYouTubePlayer({
 
       mountRef.current?.replaceChildren();
     };
-  }, [handlersRef, mountRef, playerRef, setError]);
+  }, [enabled, handlersRef, mountRef, playerRef, setError]);
 
   return playerReady;
 }

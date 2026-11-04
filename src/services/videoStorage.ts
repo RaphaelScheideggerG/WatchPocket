@@ -1,79 +1,87 @@
 export type UploadedVideo = {
-    key: string;
-    originalName: string;
-    contentType: string;
-    sizeBytes: number;
-  };
-  
+  key: string;
+  originalName: string;
+  contentType: string;
+  sizeBytes: number;
+};
+
+/**
+ * Builds the browser playback URL for an R2 object.
+ * The bucket must have public access enabled through a custom domain or r2.dev.
+ */
+export function getR2PublicVideoUrl(key: string): string | null {
+  const publicBaseUrl = import.meta.env.VITE_R2_PUBLIC_BASE_URL?.trim();
+  if (!publicBaseUrl) return null;
+
+  const encodedKey = key
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+
+  return `${publicBaseUrl.replace(/\/+$/, '')}/${encodedKey}`;
+}
+
 /**
  * Uploads a video file to Cloudflare R2 using Multipart Upload for large files.
+ * This browser-side credential approach is for local experimentation only.
  */
-export async function uploadVideoToR2(file: File,): Promise<UploadedVideo> {
-    // 1. Recupera as configurações do ambiente.
-    // TODO: migrar para secret manager.
-    const endpoint = import.meta.env.VITE_R2_ENDPOINT;
-    const accessKeyId = import.meta.env.VITE_R2_ACCESS_KEY_ID;
-    const secretAccessKey = import.meta.env.VITE_R2_SECRET_ACCESS_KEY;
-    const bucketName = import.meta.env.VITE_R2_BUCKET_NAME;
+export async function uploadVideoToR2(file: File): Promise<UploadedVideo> {
+  const endpoint = import.meta.env.VITE_R2_ENDPOINT;
+  const accessKeyId = import.meta.env.VITE_R2_ACCESS_KEY_ID;
+  const secretAccessKey = import.meta.env.VITE_R2_SECRET_ACCESS_KEY;
+  const bucketName = import.meta.env.VITE_R2_BUCKET_NAME;
 
-    // 2. Verifica se todas as configurações necessárias existem.
-    if (!endpoint || !accessKeyId || !secretAccessKey || !bucketName) {
-        throw new Error('Configurações do Cloudflare R2 incompletas.');
-    }
+  if (!endpoint || !accessKeyId || !secretAccessKey || !bucketName) {
+    throw new Error('Configurações do Cloudflare R2 incompletas.');
+  }
 
-    // 3. Importa o SDK do S3 e a lib-storage dinamicamente.
-    const { S3Client } = await import('@aws-sdk/client-s3');
-    const { Upload } = await import('@aws-sdk/lib-storage');
+  const { S3Client } = await import('@aws-sdk/client-s3');
+  const { Upload } = await import('@aws-sdk/lib-storage');
 
-    // 4. Inicializa o cliente do R2.
-    const r2Client = new S3Client({
-        region: 'auto',
-        endpoint,
-        credentials: {
-        accessKeyId,
-        secretAccessKey,
-        },
+  const r2Client = new S3Client({
+    region: 'auto',
+    endpoint,
+    credentials: {
+      accessKeyId,
+      secretAccessKey,
+    },
+  });
+
+  const key = `videos/${crypto.randomUUID()}.mp4`;
+  const contentType = file.type || 'video/mp4';
+
+  try {
+    const multipartUpload = new Upload({
+      client: r2Client,
+      params: {
+        Bucket: bucketName,
+        Key: key,
+        Body: file,
+        ContentType: contentType,
+      },
+      queueSize: 4,
+      partSize: 10 * 1024 * 1024,
     });
 
-    // 5. Gera uma chave única para o objeto.
-    const key = `videos/${crypto.randomUUID()}.mp4`;
-    const contentType = file.type || 'video/mp4';
+    multipartUpload.on('httpUploadProgress', (progress) => {
+      if (progress.loaded && progress.total) {
+        const percentage = Math.round((progress.loaded / progress.total) * 100);
+        console.log(`[ZZzzzzz] Upload do vídeo: ${percentage}%`);
+      }
+    });
 
-    try {
-        // 6. Configura o gerenciador de upload gerenciado (Multipart automático)
-        const parallelUploads3 = new Upload({
-        client: r2Client,
-        params: {
-            Bucket: bucketName,
-            Key: key,
-            Body: file, // A lib-storage aceita o File nativo e o transforma em stream/chunks internamente
-            ContentType: contentType,
-        },
-        // Configurações opcionais para otimizar o upload:
-        queueSize: 4,          // Quantidade de partes enviadas em paralelo (bom para conexões rápidas)
-        partSize: 1024 * 1024 * 10, // Tamanho de cada pedaço: 10MB (Mínimo recomendado para arquivos grandes no S3/R2 é 5MB)
-        });
+    await multipartUpload.done();
 
-        // Opcional: Se quiser acompanhar a porcentagem do progresso no console enquanto testa:
-        parallelUploads3.on("httpUploadProgress", (progress) => {
-        if (progress.loaded && progress.total) {
-            const percentage = Math.round((progress.loaded / progress.total) * 100);
-            console.log(`Upload do filme: ${percentage}% concluído`);
-        }
-        });
-
-        // 7. Executa o upload multipart completo.
-        await parallelUploads3.done();
-
-        // 8. Retorna os dados do arquivo armazenado.
-        return {
-        key,
-        originalName: file.name,
-        contentType,
-        sizeBytes: file.size,
-        };
-    } catch (error) {
-        console.error("Erro ao realizar o multipart upload no R2:", error);
-        throw error;
-    }
+    return {
+      key,
+      originalName: file.name,
+      contentType,
+      sizeBytes: file.size,
+    };
+  } catch (error) {
+    console.error('[ZZzzzzz] Erro durante o multipart upload no R2:', error);
+    throw error;
+  } finally {
+    r2Client.destroy();
+  }
 }
