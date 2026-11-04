@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { PlaybackSignal } from './useZzzRoom';
-import type { PlaybackRuntime } from './playbackSyncTypes';
+import type {
+  PendingRoomCommand,
+  PlaybackRuntime,
+  VideoProviderType,
+} from './playbackSyncTypes';
 import type {
   PlayerEventHandlers,
   YouTubePlayerRef,
@@ -9,30 +13,27 @@ import type {
 type UsePlaybackSignalsOptions = {
   playbackSignal: PlaybackSignal | null;
   videoId: string | null;
+  videoSource: VideoProviderType;
   userId: string | null;
   playerReady: boolean;
   playerRef: YouTubePlayerRef;
   handlersRef: { current: PlayerEventHandlers };
   runtime: PlaybackRuntime;
-
   publishPlayback: (
     videoId: string,
     currentSeconds: number,
     isPlaying: boolean,
     playbackRate?: number,
   ) => void;
-
-  applyRoomCommand: (
-    player: any,
-    command: { videoId: string; currentSeconds: number; isPlaying: boolean },
-  ) => void;
+  applyRoomCommand: (player: any, command: PendingRoomCommand) => void;
   setError: (message: string) => void;
 };
 
-/** Handles player events, remote playback signals, and periodic heartbeats. */
+/** Handles native/YouTube player events, room signals, and periodic checkpoints. */
 export function usePlaybackSignals({
   playbackSignal,
   videoId,
+  videoSource,
   userId,
   playerReady,
   playerRef,
@@ -45,6 +46,7 @@ export function usePlaybackSignals({
   const [speed, setSpeed] = useState(1);
   const {
     videoIdRef,
+    providerRef,
     callbacksRef,
     pendingRoomCommandRef,
     lastAppliedSignalKeyRef,
@@ -65,8 +67,14 @@ export function usePlaybackSignals({
         player.getVideoData?.()?.video_id ?? videoIdRef.current;
       if (!reportedVideoId) return;
 
+      const reportedProvider = providerRef.current;
       const pendingCommand = pendingRoomCommandRef.current;
-      if (pendingCommand && pendingCommand.videoId === reportedVideoId) {
+
+      if (
+        pendingCommand &&
+        pendingCommand.videoId === reportedVideoId &&
+        pendingCommand.provider === reportedProvider
+      ) {
         applyRoomCommand(player, pendingCommand);
         return;
       }
@@ -78,17 +86,18 @@ export function usePlaybackSignals({
         return;
       }
 
-        publishPlayback(
-          reportedVideoId,
-          Number(player.getCurrentTime?.()) || 0,
-          event.data === 1,
-          Number(player.getPlaybackRate?.()) || speed,
-        );
+      publishPlayback(
+        reportedVideoId,
+        Number(player.getCurrentTime?.()) || 0,
+        event.data === 1,
+        Number(player.getPlaybackRate?.()) || speed,
+      );
     },
     [
       applyRoomCommand,
       expectedPlayerStateRef,
       pendingRoomCommandRef,
+      providerRef,
       publishPlayback,
       suppressEventsUntilRef,
       videoIdRef,
@@ -99,6 +108,24 @@ export function usePlaybackSignals({
   const handlePlaybackRateChange = useCallback((event: any) => {
     if (Number.isFinite(event.data)) setSpeed(event.data);
   }, []);
+
+  const handleSeeked = useCallback(() => {
+    if (Date.now() < suppressEventsUntilRef.current) return;
+
+    const player = playerRef.current;
+    const activeVideoId =
+      player?.getVideoData?.()?.video_id ?? videoIdRef.current;
+    const state = Number(player?.getPlayerState?.());
+
+    if (!player || !activeVideoId || (state !== 1 && state !== 2)) return;
+
+    publishPlayback(
+      activeVideoId,
+      Number(player.getCurrentTime?.()) || 0,
+      state === 1,
+      Number(player.getPlaybackRate?.()) || speed,
+    );
+  }, [playerRef, publishPlayback, speed, suppressEventsUntilRef, videoIdRef]);
 
   const handlePlayerError = useCallback(
     (event: any) => {
@@ -112,8 +139,7 @@ export function usePlaybackSignals({
       };
 
       setError(
-        messages[event.data] ??
-          `O YouTube retornou o erro ${event.data}.`,
+        messages[event.data] ?? `O YouTube retornou o erro ${event.data}.`,
       );
     },
     [setError],
@@ -121,19 +147,20 @@ export function usePlaybackSignals({
 
   const handleAutoplayBlocked = useCallback(() => {
     setError(
-      'A reprodução automática foi bloqueada. Pressione Play no próprio vídeo.',
+      'A reprodução automática foi bloqueada pelo navegador. Pressione Play no player para permitir a reprodução.',
     );
   }, [setError]);
 
-  // The player keeps its event callbacks current without being recreated.
+  // Both player implementations dispatch this common event shape.
   handlersRef.current = {
     onStateChange: handlePlayerStateChange,
     onPlaybackRateChange: handlePlaybackRateChange,
+    onSeeked: handleSeeked,
     onError: handlePlayerError,
     onAutoplayBlocked: handleAutoplayBlocked,
   };
 
-  // Apply low-latency playback signals received from other participants.
+  // Apply low-latency commands received from another participant.
   useEffect(() => {
     const player = playerRef.current;
     const signal = playbackSignal;
@@ -145,6 +172,7 @@ export function usePlaybackSignals({
       !videoId ||
       signal.userId === userId ||
       signal.videoId !== videoId ||
+      (signal.videoSource ?? 'youtube') !== videoSource ||
       !Number.isFinite(signal.currentTime) ||
       typeof signal.isPlaying !== 'boolean'
     ) {
@@ -152,11 +180,14 @@ export function usePlaybackSignals({
     }
 
     const signalKey =
-      `${signal.userId}:${signal.videoId}:${signal.sentAt}:${signal.isPlaying}`;
+      `${signal.userId}:${signal.videoSource ?? 'youtube'}:${signal.videoId}:${signal.sentAt}:${signal.isPlaying}`;
     if (lastAppliedSignalKeyRef.current === signalKey) return;
     lastAppliedSignalKeyRef.current = signalKey;
 
-    if (pendingRoomCommandRef.current?.videoId === signal.videoId) {
+    if (
+      pendingRoomCommandRef.current?.videoId === signal.videoId &&
+      pendingRoomCommandRef.current.provider === videoSource
+    ) {
       return;
     }
 
@@ -190,12 +221,9 @@ export function usePlaybackSignals({
       currentState === 1 &&
       willSeek;
 
-    if (kind === 'heartbeat' && !heartbeatSeek) {
-      return;
-    }
+    if (kind === 'heartbeat' && !heartbeatSeek) return;
 
     const targetRate = Number(signal.playbackRate);
-
     if (
       Number.isFinite(targetRate) &&
       targetRate > 0 &&
@@ -207,15 +235,9 @@ export function usePlaybackSignals({
 
     suppressEventsUntilRef.current = Date.now() + 1100;
 
-    if (heartbeatSeek || willSeek) {
-      player.seekTo(targetSeconds, true);
-    }
-
-    if (willPlay) {
-      player.playVideo();
-    } else if (willPause) {
-      player.pauseVideo();
-    }
+    if (heartbeatSeek || willSeek) player.seekTo(targetSeconds, true);
+    if (willPlay) player.playVideo();
+    else if (willPause) player.pauseVideo();
 
     if (kind === 'intent') {
       lastAppliedIntentAtRef.current = Math.max(
@@ -235,6 +257,7 @@ export function usePlaybackSignals({
       time: targetSeconds,
       wall: Date.now(),
       state: signal.isPlaying ? 1 : 2,
+      provider: videoSource,
     };
   }, [
     lastAppliedIntentAtRef,
@@ -249,6 +272,7 @@ export function usePlaybackSignals({
     suppressEventsUntilRef,
     userId,
     videoId,
+    videoSource,
   ]);
 
   // Broadcast position every two seconds and persist periodic checkpoints.
@@ -265,17 +289,29 @@ export function usePlaybackSignals({
       const activeVideoId =
         player.getVideoData?.()?.video_id ?? videoIdRef.current;
       if (!activeVideoId) return;
-      if (pendingRoomCommandRef.current?.videoId === activeVideoId) return;
+      const pendingCommand = pendingRoomCommandRef.current;
+      if (
+        pendingCommand &&
+        pendingCommand.videoId === activeVideoId &&
+        pendingCommand.provider === providerRef.current
+      ) {
+        return;
+      }
 
       const now = Date.now();
       const currentSeconds = Number(player.getCurrentTime?.()) || 0;
       const isPlaying = playerState === 1;
+      const currentProvider = providerRef.current;
       const previous = lastSampleRef.current;
 
       let stateChanged = false;
       let seeked = false;
 
-      if (previous && previous.videoId === activeVideoId) {
+      if (
+        previous &&
+        previous.videoId === activeVideoId &&
+        previous.provider === currentProvider
+      ) {
         stateChanged = previous.state !== playerState;
 
         const elapsedSeconds = Math.max(0, (now - previous.wall) / 1000);
@@ -289,11 +325,14 @@ export function usePlaybackSignals({
       void callbacksRef.current
         .onBroadcastPlayback({
           videoId: activeVideoId,
+          videoSource: currentProvider,
           currentTime: currentSeconds,
           isPlaying,
           playbackRate: Number(player.getPlaybackRate?.()) || speed,
           sentAt: now,
-          kind: 'heartbeat',
+          // A seek while paused must be applied remotely too, so publish it as
+          // an intent rather than a passive heartbeat.
+          kind: seeked ? 'intent' : 'heartbeat',
         })
         .catch((broadcastError) => {
           console.error(
@@ -324,6 +363,7 @@ export function usePlaybackSignals({
         time: currentSeconds,
         wall: now,
         state: playerState,
+        provider: currentProvider,
       };
     }, 2000);
 
@@ -335,12 +375,13 @@ export function usePlaybackSignals({
     pendingRoomCommandRef,
     playerReady,
     playerRef,
+    providerRef,
     suppressEventsUntilRef,
     videoIdRef,
     speed,
   ]);
 
-  // Keep the player's speed aligned with the latest local playback-rate event.
+  // Keep supported playback-rate controls aligned between participants.
   useEffect(() => {
     const player = playerRef.current;
 

@@ -1,10 +1,13 @@
 import type { MutableRefObject } from 'react';
 import type { PlaybackSignal } from './useZzzRoom';
 
+export type VideoProviderType = 'youtube' | 'upload';
+
 export type PendingRoomCommand = {
   videoId: string;
   currentSeconds: number;
   isPlaying: boolean;
+  provider: VideoProviderType;
 };
 
 export type PlaybackSample = {
@@ -12,6 +15,7 @@ export type PlaybackSample = {
   time: number;
   wall: number;
   state: number;
+  provider: VideoProviderType;
 };
 
 export type SavePlayback = (
@@ -26,14 +30,13 @@ export type BroadcastPlayback = (
 
 export type PlaybackRuntime = {
   videoIdRef: MutableRefObject<string | null>;
+  providerRef: MutableRefObject<VideoProviderType>;
   callbacksRef: MutableRefObject<{
     onSavePlayback: SavePlayback;
     onBroadcastPlayback: BroadcastPlayback;
   }>;
   pendingRoomCommandRef: MutableRefObject<PendingRoomCommand | null>;
   lastLoadedVideoIdRef: MutableRefObject<string | null>;
-  lastAppliedRoomCommandKeyRef: MutableRefObject<string | null>;
-  hasAppliedRoomCommandRef: MutableRefObject<boolean>;
   lastAppliedSignalKeyRef: MutableRefObject<string | null>;
   lastAppliedIntentAtRef: MutableRefObject<number>;
   lastLocalIntentAtRef: MutableRefObject<number>;

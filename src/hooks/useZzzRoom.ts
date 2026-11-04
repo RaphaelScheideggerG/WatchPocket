@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RealtimeChannel, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import type { VideoProviderType } from './playbackSyncTypes';
 
 export type RoomState = {
   room_id: string;
   video_id: string | null;
+  video_source: VideoProviderType;
   is_playing: boolean;
   current_seconds: number;
   playback_rate: number;
@@ -24,6 +26,7 @@ export type ChatMessage = {
 export type PlaybackSignal = {
   userId: string;
   videoId: string;
+  videoSource: VideoProviderType;
   currentTime: number;
   isPlaying: boolean;
   playbackRate: number;
@@ -55,13 +58,22 @@ function mergeMessages(...groups: ChatMessage[][]): ChatMessage[] {
     .slice(-100);
 }
 
-function newestState(current: RoomState | null, incoming: RoomState | null): RoomState | null {
+function newestState(
+  current: RoomState | null,
+  incoming: RoomState | null,
+): RoomState | null {
   if (!current) return incoming;
   if (!incoming) return current;
-  return Date.parse(incoming.updated_at) >= Date.parse(current.updated_at) ? incoming : current;
+  return Date.parse(incoming.updated_at) >= Date.parse(current.updated_at)
+    ? incoming
+    : current;
 }
 
-export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptions) {
+export function useZzzRoom({
+  inviteCode,
+  displayName,
+  enabled,
+}: UseZzzRoomOptions) {
   const [status, setStatus] = useState<ConnectionStatus>('idle');
   const [roomId, setRoomId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -89,11 +101,10 @@ export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptio
       setPlaybackSignal(null);
       setOnlinePeople([]);
 
-      let authUser: User | null = null;
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       if (sessionError) throw sessionError;
-      authUser = sessionData.session?.user ?? null;
 
+      let authUser: User | null = sessionData.session?.user ?? null;
       if (!authUser) {
         const { data, error: signInError } = await supabase.auth.signInAnonymously();
         if (signInError) {
@@ -135,7 +146,11 @@ export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptio
             filter: `room_id=eq.${joinedRoomId}`,
           },
           (payload) => {
-            if (alive) setRoomState((current) => newestState(current, payload.new as RoomState));
+            if (alive) {
+              setRoomState((current) =>
+                newestState(current, payload.new as RoomState),
+              );
+            }
           },
         )
         .on(
@@ -147,13 +162,21 @@ export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptio
             filter: `room_id=eq.${joinedRoomId}`,
           },
           (payload) => {
-            if (alive) setMessages((current) => mergeMessages(current, [payload.new as ChatMessage]));
+            if (alive) {
+              setMessages((current) =>
+                mergeMessages(current, [payload.new as ChatMessage]),
+              );
+            }
           },
         )
         .on('broadcast', { event: 'playback' }, ({ payload }) => {
           if (!alive || !payload || typeof payload !== 'object') return;
           const signal = payload as PlaybackSignal;
-          if (typeof signal.userId === 'string' && typeof signal.videoId === 'string') {
+          if (
+            typeof signal.userId === 'string' &&
+            typeof signal.videoId === 'string' &&
+            (signal.videoSource === 'youtube' || signal.videoSource === 'upload')
+          ) {
             setPlaybackSignal(signal);
           }
         })
@@ -180,7 +203,11 @@ export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptio
 
             try {
               const [stateResult, messagesResult] = await Promise.all([
-                supabase.from('zz_room_state').select('*').eq('room_id', joinedRoomId).single(),
+                supabase
+                  .from('zz_room_state')
+                  .select('*')
+                  .eq('room_id', joinedRoomId)
+                  .single(),
                 supabase
                   .from('zz_messages')
                   .select('*')
@@ -192,16 +219,31 @@ export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptio
               if (stateResult.error) throw stateResult.error;
               if (messagesResult.error) throw messagesResult.error;
 
-              setRoomState((current) => newestState(current, stateResult.data as RoomState));
+              setRoomState((current) =>
+                newestState(current, stateResult.data as RoomState),
+              );
               setMessages((current) =>
-                mergeMessages([...(messagesResult.data ?? [])].reverse() as ChatMessage[], current),
+                mergeMessages(
+                  [...(messagesResult.data ?? [])].reverse() as ChatMessage[],
+                  current,
+                ),
               );
             } catch (loadError) {
-              setError(loadError instanceof Error ? loadError.message : 'Falha ao carregar a sala.');
+              setError(
+                loadError instanceof Error
+                  ? loadError.message
+                  : 'Falha ao carregar a sala.',
+              );
             }
-          } else if (channelStatus === 'CHANNEL_ERROR' || channelStatus === 'TIMED_OUT') {
+          } else if (
+            channelStatus === 'CHANNEL_ERROR' ||
+            channelStatus === 'TIMED_OUT'
+          ) {
             setStatus('error');
-            setError(subscribeError?.message ?? 'A conexão Realtime falhou. Confira as políticas e tente recarregar.');
+            setError(
+              subscribeError?.message ??
+                'A conexão Realtime falhou. Confira as políticas e tente recarregar.',
+            );
           } else if (channelStatus === 'CLOSED') {
             setStatus('idle');
           }
@@ -211,7 +253,11 @@ export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptio
     connect().catch((connectError: unknown) => {
       if (!alive) return;
       setStatus('error');
-      setError(connectError instanceof Error ? connectError.message : 'Não foi possível entrar na sala.');
+      setError(
+        connectError instanceof Error
+          ? connectError.message
+          : 'Não foi possível entrar na sala.',
+      );
     });
 
     return () => {
@@ -222,31 +268,20 @@ export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptio
   }, [enabled, inviteCode, displayName]);
 
   useEffect(() => {
-    if (
-      !enabled ||
-      status !== 'connected' ||
-      !roomId ||
-      !userId
-    ) {
-      return;
-    }
+    if (!enabled || status !== 'connected' || !roomId || !userId) return;
 
     let active = true;
     let heartbeatInFlight = false;
 
     const heartbeat = async () => {
       if (!active || heartbeatInFlight) return;
-
       heartbeatInFlight = true;
 
       try {
         const { error: heartbeatError } = await supabase.rpc(
           'zz_heartbeat_room',
-          {
-            p_room_id: roomId,
-          },
+          { p_room_id: roomId },
         );
-
         if (heartbeatError && active) {
           console.error(
             '[ZZzzzzz] Falha ao renovar a atividade da sala:',
@@ -255,23 +290,15 @@ export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptio
         }
       } catch (heartbeatError) {
         if (active) {
-          console.error(
-            '[ZZzzzzz] Erro inesperado no heartbeat:',
-            heartbeatError,
-          );
+          console.error('[ZZzzzzz] Erro inesperado no heartbeat:', heartbeatError);
         }
       } finally {
         heartbeatInFlight = false;
       }
     };
 
-    // Registra a atividade assim que a conexão estiver pronta.
     void heartbeat();
-
-    // Continua renovando enquanto a sala estiver conectada.
-    const intervalId = window.setInterval(() => {
-      void heartbeat();
-    }, 30_000);
+    const intervalId = window.setInterval(() => void heartbeat(), 30_000);
 
     return () => {
       active = false;
@@ -280,18 +307,27 @@ export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptio
   }, [enabled, status, roomId, userId]);
 
   const selectVideo = useCallback(
-    async (videoId: string) => {
+    async (videoId: string, videoSource: VideoProviderType = 'youtube') => {
       if (!roomId || !userId) return;
+
       const { data, error: updateError } = await supabase
         .from('zz_room_state')
-        .update({ video_id: videoId, is_playing: true, current_seconds: 0, updated_by: userId })
+        .update({
+          video_id: videoId,
+          video_source: videoSource,
+          is_playing: true,
+          current_seconds: 0,
+          updated_by: userId,
+        })
         .eq('room_id', roomId)
         .select('*')
         .single();
+
       if (updateError) {
         setError(updateError.message);
         throw updateError;
       }
+
       setRoomState(data as RoomState);
     },
     [roomId, userId],
@@ -308,13 +344,11 @@ export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptio
       const safeTime = Number.isFinite(currentTime)
         ? Math.max(0, currentTime)
         : 0;
-
       const updateData = {
         current_seconds: safeTime,
         is_playing: isPlaying,
         updated_by: userId,
-        ...(playbackRate !== undefined &&
-        Number.isFinite(playbackRate)
+        ...(playbackRate !== undefined && Number.isFinite(playbackRate)
           ? { playback_rate: playbackRate }
           : {}),
       };
@@ -331,9 +365,7 @@ export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptio
         return;
       }
 
-      setRoomState((current) =>
-        newestState(current, data as RoomState),
-      );
+      setRoomState((current) => newestState(current, data as RoomState));
     },
     [roomId, userId],
   );
@@ -346,7 +378,9 @@ export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptio
         event: 'playback',
         payload: { ...signal, userId },
       });
-      if (sendStatus !== 'ok') setError('Não consegui sincronizar o player por Realtime.');
+      if (sendStatus !== 'ok') {
+        setError('Não consegui sincronizar o player por Realtime.');
+      }
     },
     [userId],
   );
@@ -357,18 +391,18 @@ export function useZzzRoom({ inviteCode, displayName, enabled }: UseZzzRoomOptio
     async (body: string) => {
       const cleanBody = body.trim().slice(0, 1000);
       if (!roomId || !userId || !cleanBody) return;
+
       const { data, error: insertError } = await supabase
         .from('zz_messages')
-        .insert({
-          room_id: roomId,
-          body: cleanBody,
-        })
+        .insert({ room_id: roomId, body: cleanBody })
         .select('*')
         .single();
+
       if (insertError) {
         setError(insertError.message);
         throw insertError;
       }
+
       setMessages((current) => mergeMessages(current, [data as ChatMessage]));
     },
     [roomId, userId, displayName],
